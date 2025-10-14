@@ -2,13 +2,13 @@ import tkinter as tk
 from tkinter import messagebox, filedialog
 from tkinter import ttk
 
-class CipherAlgorithm:
+class CipherAlgorithm: # klasa bazowa
     def encrypt(self, text):
         raise NotImplementedError
     def decrypt(self, text):
         raise NotImplementedError
 
-class CaesarCipher(CipherAlgorithm):
+class CaesarCipher(CipherAlgorithm): #Szyfr Cezara
     def __init__(self, shift=3):
         self.shift = shift
     def encrypt(self, text):
@@ -30,11 +30,36 @@ class CaesarCipher(CipherAlgorithm):
                 result += char
         return result
 
-class ReverseCipher(CipherAlgorithm):
+class ReverseCipher(CipherAlgorithm): #Szyfr odwracający ciąg znaków
     def encrypt(self, text):
         return text[::-1]
     def decrypt(self, text):
         return text[::-1]
+    
+class BeaufortCipher(CipherAlgorithm): #Szyfr Beaufort'a
+    def __init__(self, key):
+        self.key = key
+
+    def _process(self, text, encrypt=True):
+        result = ''
+        key = self.key
+        key_len = len(key)
+        for i, char in enumerate(text):
+            if char.isalpha():
+                stay_in_alphabet = ord('A') if char.isupper() else ord('a')
+                p = ord(char.upper()) - ord('A')
+                k = ord(key[i % key_len].upper()) - ord('A')
+                c = (k - p) % 26
+                result += chr(c + stay_in_alphabet)
+            else:
+                result += char
+        return result
+
+    def encrypt(self, text):
+        return self._process(text)
+
+    def decrypt(self, text):
+        return self._process(text)
 
 class EncryptionApp(tk.Tk):
     def __init__(self):
@@ -55,12 +80,16 @@ class EncryptionApp(tk.Tk):
         ttk.Label(self.current_frame, text="Wybierz szyfr", font=("Arial", 18)).pack(pady=44)
         ttk.Button(self.current_frame, text="Szyfr Cezara", command=self.show_caesar_cipher).pack(pady=16)
         ttk.Button(self.current_frame, text="Reverse Cipher", command=self.show_reverse_cipher).pack(pady=8)
+        ttk.Button(self.current_frame, text="Szyfr Beaufort'a", command=self.show_beaufort_cipher).pack(pady=8)
 
     def show_caesar_cipher(self):
         self.show_cipher_frame("Caesar Cipher")
 
     def show_reverse_cipher(self):
         self.show_cipher_frame("Reverse Cipher")
+    
+    def show_beaufort_cipher(self):
+        self.show_cipher_frame("Beaufort Cipher")
 
     def show_cipher_frame(self, cipher_name):
         if self.current_frame:
@@ -95,6 +124,11 @@ class EncryptionApp(tk.Tk):
             ttk.Label(self.current_frame, text="Przesunięcie:").pack()
             ttk.Entry(self.current_frame, textvariable=shift_var, width=6).pack(pady=2)
 
+        key_var = tk.StringVar()
+        if cipher_name == "Beaufort Cipher":
+            ttk.Label(self.current_frame, text="Klucz:").pack()
+            ttk.Entry(self.current_frame, textvariable=key_var, width=20).pack(pady=2)
+
         def process():
             text = input_data.get()
             if not text.strip():
@@ -103,13 +137,21 @@ class EncryptionApp(tk.Tk):
             try:
                 if cipher_name == "Caesar Cipher":
                     algo = CaesarCipher(shift_var.get())
-                else:
+                elif cipher_name == "Reverse Cipher":
                     algo = ReverseCipher()
+                elif cipher_name == "Beaufort Cipher":
+                    key = key_var.get()
+                    if not key.isalpha() or not key:
+                        messagebox.showerror("Błąd", "Klucz musi być niepusty i alfabetyczny.")
+                        return
+                    algo = BeaufortCipher(key)
+
                 result = algo.encrypt(text) if mode_var.get() == "encrypt" else algo.decrypt(text)
                 result_text.config(state='normal')
                 result_text.delete('1.0', tk.END)
                 result_text.insert(tk.END, result)
                 result_text.config(state='disabled')
+            
             except Exception as e:
                 messagebox.showerror("Błąd", f"Nieprawidłowe dane lub algorytm. {e}")
 
@@ -128,7 +170,8 @@ class EncryptionApp(tk.Tk):
         container = ttk.Frame(self.current_frame)
         container.pack(pady=2)
         ttk.Radiobutton(container, text="Szyfruj", variable=mode_var, value="encrypt").pack(side='left', padx=8)
-        ttk.Radiobutton(container, text="Odszyfruj", variable=mode_var, value="decrypt").pack(side='left', padx=8)
+        if cipher_name != "Beaufort Cipher":
+            ttk.Radiobutton(container, text="Odszyfruj", variable=mode_var, value="decrypt").pack(side='left', padx=8)
 
         ttk.Button(self.current_frame, text="Wykonaj", command=process).pack(pady=8)
 

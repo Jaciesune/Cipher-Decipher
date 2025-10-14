@@ -61,6 +61,38 @@ class BeaufortCipher(CipherAlgorithm): #Szyfr Beaufort'a
     def decrypt(self, text):
         return self._process(text)
 
+class RunningKeyCipher(CipherAlgorithm):
+    def __init__(self, key):
+        self.key = key
+    
+    def encrypt(self, text):
+        result = ""
+        key = self.key
+        for i, char in enumerate(text):
+            if char.isalpha():
+                stay_in_alphabet = ord('A') if char.isupper() else ord('a')
+                pi = ord(char.upper()) - ord('A')
+                ki = ord(key[i % len(key)].upper()) - ord('A')
+                ci = (pi + ki) % 26
+                result += chr(ci + stay_in_alphabet)
+            else:
+                result += char
+        return result
+    
+    def decrypt(self, text):
+        result = ""
+        key = self.key
+        for i, char in enumerate(text):
+            if char.isalpha():
+                stay_in_alphabet = ord('A') if char.isupper() else ord('a')
+                pi = ord(char.upper()) - ord('A')
+                ki = ord(key[i % len(key)].upper()) - ord('A')
+                ci = (pi - ki) % 26
+                result += chr(ci + stay_in_alphabet)
+            else:
+                result += char
+        return result
+
 class EncryptionApp(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -81,6 +113,7 @@ class EncryptionApp(tk.Tk):
         ttk.Button(self.current_frame, text="Szyfr Cezara", command=self.show_caesar_cipher).pack(pady=16)
         ttk.Button(self.current_frame, text="Reverse Cipher", command=self.show_reverse_cipher).pack(pady=8)
         ttk.Button(self.current_frame, text="Szyfr Beaufort'a", command=self.show_beaufort_cipher).pack(pady=8)
+        ttk.Button(self.current_frame, text="Szyfr z kluczem bieżącym", command=self.show_running_key_cipher).pack(pady=8)
 
     def show_caesar_cipher(self):
         self.show_cipher_frame("Caesar Cipher")
@@ -90,6 +123,9 @@ class EncryptionApp(tk.Tk):
     
     def show_beaufort_cipher(self):
         self.show_cipher_frame("Beaufort Cipher")
+
+    def show_running_key_cipher(self):
+        self.show_cipher_frame("Running Key Cipher")
 
     def show_cipher_frame(self, cipher_name):
         if self.current_frame:
@@ -118,6 +154,17 @@ class EncryptionApp(tk.Tk):
                 except Exception as e:
                     messagebox.showerror("Błąd", f"Nie można wczytać pliku. {e}")
 
+        def load_key_from_file():
+            file_path = filedialog.askopenfilename(filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")])
+            if file_path:
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        key_data = f.read()
+                        key_data = ''.join([char for char in key_data if char.isalpha()])
+                        key_var.set(key_data)
+                except Exception as e:
+                    messagebox.showerror("Błąd", f"Nie można wczytać klucza. {e}")
+
         ttk.Button(self.current_frame, text="Wczytaj z pliku", command=load_from_file).pack(pady=4)
 
         if cipher_name == "Caesar Cipher":
@@ -128,6 +175,10 @@ class EncryptionApp(tk.Tk):
         if cipher_name == "Beaufort Cipher":
             ttk.Label(self.current_frame, text="Klucz:").pack()
             ttk.Entry(self.current_frame, textvariable=key_var, width=20).pack(pady=2)
+            ttk.Button(self.current_frame, text="Wczytaj klucz z pliku", command=load_key_from_file).pack(pady=2)
+        
+        if cipher_name == "Running Key Cipher":
+            ttk.Button(self.current_frame, text="Wczytaj klucz z pliku", command=load_key_from_file).pack(pady=2)
 
         def process():
             text = input_data.get()
@@ -145,6 +196,12 @@ class EncryptionApp(tk.Tk):
                         messagebox.showerror("Błąd", "Klucz musi być niepusty i alfabetyczny.")
                         return
                     algo = BeaufortCipher(key)
+                elif cipher_name == "Running Key Cipher":
+                    key = key_var.get()
+                    if len(key) < len(text) or not key.isalpha():
+                        messagebox.showerror("Błąd", "Klucz musi być alfabetyczny i nie krótszy niż wiadomość.")
+                        return
+                    algo = RunningKeyCipher(key)
 
                 result = algo.encrypt(text) if mode_var.get() == "encrypt" else algo.decrypt(text)
                 result_text.config(state='normal')

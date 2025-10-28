@@ -8,6 +8,8 @@ class CipherAlgorithm: # klasa bazowa
     def decrypt(self, text):
         raise NotImplementedError
 
+# Funkcje do klas
+
 sbox = [99, 124, 119, 123, 242, 107, 111, 197, 48, 1, 103, 43, 254, 215, 171, 118,
         202, 130, 201, 125, 250, 89, 71, 240, 173, 212, 162, 175, 156, 164, 114, 192,
         183, 253, 147, 38, 54, 63, 247, 204, 52, 165, 229, 241, 113, 216, 49, 21,
@@ -134,6 +136,45 @@ def inv_mix_columns(s):
         out += inv_mix_single_column(col)
     return out
 
+def inc_bytes(bs):
+        as_list = list(bs)
+        for i in reversed(range(len(as_list))):
+            as_list[i] = (as_list[i] + 1) % 256
+            if as_list[i] != 0:
+                break
+        return bytes(as_list)
+
+# Funkcja mnożenia w GF(2^128)
+def gf_mul(X, Y):
+    R = 0xe1000000000000000000000000000000
+    x = int.from_bytes(X, "big")
+    y = int.from_bytes(Y, "big")
+    z = 0
+    for i in range(128):
+        if y & (1 << (127 - i)):
+            z ^= x
+        if x & 1:
+            x = (x >> 1) ^ R
+        else:
+            x >>= 1
+    return z.to_bytes(16, "big")
+
+#Funkcja GHASH
+def ghash(H, A, C):
+    a_len = len(A)
+    c_len = len(C)
+    A_padded = A + b"\x00" * ((16 - a_len % 16) % 16)
+    C_padded = C + b"\x00" * ((16 - c_len % 16) % 16)
+    X = b"\x00" * 16
+    X_input = A_padded + C_padded + (a_len * 8).to_bytes(8, "big") + (c_len * 8).to_bytes(8, "big")
+    blocks = [X_input[i:i+16] for i in range(0, len(X_input), 16)]
+    for block in blocks:
+        X = gf_mul(bytes([x ^ y for x, y in zip(X, block)]), H)
+    return X
+
+
+# -------------------------------------- #
+
 class AES_ECB(CipherAlgorithm):
     def __init__(self, key):
         assert len(key) == 16
@@ -175,6 +216,127 @@ class AES_ECB(CipherAlgorithm):
         blocks = [data[i:i+16] for i in range(0, len(data), 16)]
         dec = b"".join(self.decrypt_block(b) for b in blocks)
         return unpad(dec)
+    
+class AES_CBC(CipherAlgorithm):
+    def __init__(self, key, iv):
+        assert len(key) == 16
+        assert len(iv) == 16
+        self.iv = iv
+        self.ecb = AES_ECB(key)
+    def encrypt(self, text):
+        data = pad(text.encode("utf-8") if isinstance(text, str) else text)
+        blocks = [data[i:i+16] for i in range(0, len(data), 16)]
+        result = []
+        prev = self.iv
+        for block in blocks:
+            xored = bytes([b ^ p for b, p in zip(block, prev)])
+            enc_blk = self.ecb.encrypt_block(xored)
+            result.append(enc_blk)
+            prev = enc_blk
+        return b"".join(result)
+    def decrypt(self, data):
+        blocks = [data[i:i+16] for i in range(0, len(data), 16)]
+        result = []
+        prev = self.iv
+        for block in blocks:
+            dec_blk = self.ecb.decrypt_block(block)
+            plain_blk = bytes([b ^ p for b, p in zip(dec_blk, prev)])
+            result.append(plain_blk)
+            prev = block
+        return unpad(b"".join(result))
+
+class AES_CTR(CipherAlgorithm):
+    def __init__(self, key, nonce):
+        assert len(key) == 16
+        assert len(nonce) == 16
+        self.nonce = nonce
+        self.ecb = AES_ECB(key)
+
+    def process(self, data):
+        blocks = [data[i:i+16] for i in range(0, len(data), 16)]
+        ctr = self.nonce
+        out = []
+        for block in blocks:
+            stream = self.ecb.encrypt_block(ctr)
+            out_blk = bytes([b ^ s for b, s in zip(block, stream)])
+            out.append(out_blk)
+            ctr = inc_bytes(ctr)
+        return b"".join(out)
+    def encrypt(self, text):
+        data = text.encode("utf-8") if isinstance(text, str) else text
+        return self.process(data)
+    def decrypt(self, data):
+        return self.process(data)
+    
+class AES_GCM(CipherAlgorithm):
+    def __init__(self, key, nonce, aad=b""):
+        assert len(key) == 16
+        assert len(nonce) == 16 or len(nonce) == 12
+        self.nonce = nonce
+        self.key = key
+        self.ecb = AES_ECB(key)
+        self.aad = aad
+
+    def encrypt(self, text):
+        data = text.encode("utf-8") if isinstance(text, str) else text
+        # Krok 1: gen. subkey h
+        H = self.ecb.encrypt_block(b"\x00" * 16)
+        if len(self.nonce) == 12:
+            J0 = self.nonce + b"\x00\x00\x00\x01"
+        else:
+            J0 = self.nonce
+
+        # CTR:
+        ctr_block = bytearray(J0)
+        ctr_block[-1] = (ctr_block[-1] + 1) % 256
+
+        # Szyfrowanie jak w CTR
+        blocks = [data[i:i+16] for i in range(0, len(data), 16)]
+        ciphertext = []
+        for block in blocks:
+            stream = self.ecb.encrypt_block(bytes(ctr_block))
+            cipher = bytes([b ^ s for b, s in zip(block.ljust(16, b"\x00"), stream)])
+            ciphertext.append(cipher[:len(block)])
+            # Inkrementuj licznik
+            for i in reversed(range(len(ctr_block))):
+                ctr_block[i] = (ctr_block[i] + 1) % 256
+                if ctr_block[i] != 0:
+                    break
+        ciphertext_bytes = b"".join(ciphertext)
+
+        # Tag: GHASH(H, AAD, ciphertext)
+        tag_input = ghash(H, self.aad, ciphertext_bytes)
+        S = self.ecb.encrypt_block(J0)
+        tag = bytes([x ^ y for x, y in zip(tag_input, S)])
+        return ciphertext_bytes, tag
+
+    def decrypt(self, data, tag):
+        # Proces ten sam co przy szyfrowaniu
+        H = self.ecb.encrypt_block(b"\x00" * 16)
+        if len(self.nonce) == 12:
+            J0 = self.nonce + b"\x00\x00\x00\x01"
+        else:
+            J0 = self.nonce
+        ctr_block = bytearray(J0)
+        ctr_block[-1] = (ctr_block[-1] + 1) % 256
+        blocks = [data[i:i+16] for i in range(0, len(data), 16)]
+        plaintext = []
+        for block in blocks:
+            stream = self.ecb.encrypt_block(bytes(ctr_block))
+            plain = bytes([b ^ s for b, s in zip(block.ljust(16, b"\x00"), stream)])
+            plaintext.append(plain[:len(block)])
+            for i in reversed(range(len(ctr_block))):
+                ctr_block[i] = (ctr_block[i] + 1) % 256
+                if ctr_block[i] != 0:
+                    break
+        plaintext_bytes = b"".join(plaintext)
+        # Tag: GHASH(H, AAD, ciphertext)
+        expected_tag_input = ghash(H, self.aad, data)
+        S = self.ecb.encrypt_block(J0)
+        expected_tag = bytes([x ^ y for x, y in zip(expected_tag_input, S)])
+        if expected_tag != tag:
+            raise ValueError("Tag/MAC niezgodny — dane podrobione lub z błędem!")
+        return plaintext_bytes
 
 class CaesarCipher(CipherAlgorithm): #Szyfr Cezara
     def __init__(self, shift=3):
@@ -398,21 +560,64 @@ class EncryptionApp(tk.Tk):
                             return
                         if mode == "ECB":
                             aes = AES_ECB(key)
+                        elif mode == "CBC":
+                            if not iv or len(iv) != 16:
+                                messagebox.showerror("Błąd", "IV do CBC musi mieć 16 znaków!")
+                                return
+                            aes = AES_CBC(key, iv)
+                        elif mode == "CTR":
+                            if not iv or len(iv) != 16:
+                                messagebox.showerror("Błąd", "Nonce/IV do CTR musi mieć 16 znaków!")
+                                return
+                            aes = AES_CTR(key, iv)
+                        
+                        elif mode == "GCM":
+                            if not iv or not (len(iv) == 12 or len(iv) == 16):
+                                messagebox.showerror("Błąd", "Nonce/IV do GCM musi mieć 12 lub 16 znaków!")
+                                return
+                            aes = AES_GCM(key, iv)
                             if mode_var.get() == "encrypt":
-                                result_bytes = aes.encrypt(text)
-                                result = result_bytes.hex()
+                                cipher_bytes, tag = aes.encrypt(text)
+                                # Pokazujemy tekst i tag (tag powinien być HEX do skopiowania/deszyfrowania!)
+                                result = cipher_bytes.hex() + "\nTAG: " + tag.hex()
                             else:
-                                decoded = bytes.fromhex(text.strip())
-                                result_bytes = aes.decrypt(decoded)
-                                result = result_bytes.decode("utf-8", errors="ignore")
+                                # Dla deszyfrowania użytkownik musi podać HEX ciphertext + HEX tag (np. sklejane: tekst\nTAG:hex)
+                                if "TAG:" in text:
+                                    enc, tag_hex = text.strip().split("TAG:")
+                                    enc_bytes = bytes.fromhex(enc.strip())
+                                    tag_bytes = bytes.fromhex(tag_hex.strip())
+                                    try:
+                                        plain_bytes = aes.decrypt(enc_bytes, tag_bytes)
+                                        result = plain_bytes.decode("utf-8", errors="ignore")
+                                    except Exception as err:
+                                        messagebox.showerror("Błąd", str(err))
+                                        return
+                                else:
+                                    messagebox.showerror("Błąd", "Podaj szyfrogram oraz tag poprawnie (sklejone HEX + 'TAG:hex').")
+                                    return
                             result_text.config(state='normal')
                             result_text.delete('1.0', tk.END)
                             result_text.insert(tk.END, result)
                             result_text.config(state='disabled')
                             return
+
                         else:
-                            messagebox.showinfo("Info", "Na razie tylko tryb ECB!")
+                            messagebox.showinfo("Info", "Tryb GCM niezaimplementowany.")
                             return
+
+                        if mode_var.get() == "encrypt":
+                            result_bytes = aes.encrypt(text)
+                            result = result_bytes.hex()
+                        else:
+                            decoded = bytes.fromhex(text.strip())
+                            result_bytes = aes.decrypt(decoded)
+                            result = result_bytes.decode("utf-8", errors="ignore")
+
+                        result_text.config(state='normal')
+                        result_text.delete('1.0', tk.END)
+                        result_text.insert(tk.END, result)
+                        result_text.config(state='disabled')
+                        return
                     except Exception as e:
                         messagebox.showerror("Błąd", f"Nieprawidłowe dane lub algorytm. {e}")
                         return

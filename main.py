@@ -231,6 +231,43 @@ def extended_gcd(a, b):
 
 # RSA 
 
+class RSA(CipherAlgorithm):
+    def __init__(self, bits=512):
+        self.bits = bits
+        self.e = 65537
+        self._generate_keys()
+
+    def _generate_keys(self):
+        p = generate_prime(self.bits)
+        q = generate_prime(self.bits)
+        while q == p:
+            q = generate_prime(self.bits)
+        self.n = p * q
+        phi = (p - 1) * (q - 1)
+        while gcd(self.e, phi) != 1:
+            self.e += 2
+        self.d = modinv(self.e, phi)
+
+    def encrypt(self, text):
+        # Zamienia tekst na liczby, szyfruje blokowo (blok < n)
+        # Prosta wersja: koduje utf-8 jako int, wymaga podziału na małe bloki
+        plain_bytes = text.encode('utf-8')
+        block_size = (self.n.bit_length() - 1) // 8
+        blocks = [plain_bytes[i:i+block_size] for i in range(0, len(plain_bytes), block_size)]
+        encrypted_blocks = [pow(int.from_bytes(block, 'big'), self.e, self.n) for block in blocks]
+        return encrypted_blocks  # lista liczb
+
+    def decrypt(self, ciphertext):
+        block_size = (self.n.bit_length() - 1) // 8
+        plain_bytes = b''.join([pow(c, self.d, self.n).to_bytes(block_size, 'big').lstrip(b'\x00') for c in ciphertext])
+        return plain_bytes.decode('utf-8', errors='replace')
+
+    def public_key(self):
+        return (self.n, self.e)
+
+    def private_key(self):
+        return (self.n, self.d)
+
 
 # -- RSA -- #
 

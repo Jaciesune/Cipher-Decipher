@@ -573,16 +573,20 @@ class EncryptionApp(tk.Tk):
 
         if cipher_name == "RSA":
             bits_var = tk.IntVar(value=256)
-            key_text = tk.StringVar()
+            n_text = tk.StringVar()
+            e_text = tk.StringVar()
+            d_text = tk.StringVar()
             rsa_obj = [None]
+            input_data = tk.StringVar()
 
             def generate_keys():
                 try:
                     rsa = RSA(bits=bits_var.get())
                     pubkey = rsa.public_key()
                     privkey = rsa.private_key()
-                    key_info = f"Publiczny:\nn={pubkey[0]}\ne={pubkey[1]}\n\nPrywatny:\nd={privkey[1]}"
-                    key_text.set(key_info)
+                    n_text.set(str(pubkey[0]))
+                    e_text.set(str(pubkey[1]))
+                    d_text.set(str(privkey[1]))
                     rsa_obj[0] = rsa
                 except Exception as e:
                     messagebox.showerror("Błąd", f"Błąd generowania kluczy: {e}")
@@ -595,7 +599,6 @@ class EncryptionApp(tk.Tk):
                     encrypted = rsa_obj[0].encrypt(text)
                     result_text.config(state='normal')
                     result_text.delete('1.0', tk.END)
-                    print(encrypted, type(encrypted))
                     result_text.insert(tk.END, ",".join(map(str, encrypted)))
                     result_text.config(state='disabled')
                 except Exception as e:
@@ -606,7 +609,7 @@ class EncryptionApp(tk.Tk):
                     if not rsa_obj[0]:
                         raise Exception("Brak wygenerowanego klucza!")
                     ciphertext = input_data.get()
-                    blocks = [int(part.strip()) for part in ciphertext.strip().split(',')]
+                    blocks = [int(part.strip()) for part in ciphertext.strip().split(',') if part.strip()]
                     decrypted = rsa_obj[0].decrypt(blocks)
                     result_text.config(state='normal')
                     result_text.delete('1.0', tk.END)
@@ -630,16 +633,24 @@ class EncryptionApp(tk.Tk):
             ttk.Label(self.current_frame, text="Długość klucza (bity):").pack()
             ttk.Entry(self.current_frame, textvariable=bits_var, width=8).pack(pady=2)
             ttk.Button(self.current_frame, text="Generuj klucze", command=generate_keys).pack(pady=2)
-            ttk.Label(self.current_frame, text="Parametry klucza:").pack()
-            ttk.Entry(self.current_frame, textvariable=key_text, width=60, state="readonly").pack(pady=2, fill='x')
+
+            ttk.Label(self.current_frame, text="n (moduł):").pack()
+            ttk.Entry(self.current_frame, textvariable=n_text, width=90, state="readonly").pack(pady=1, fill='x')
+            ttk.Label(self.current_frame, text="e (klucz publiczny):").pack()
+            ttk.Entry(self.current_frame, textvariable=e_text, width=32, state="readonly").pack(pady=1)
+            ttk.Label(self.current_frame, text="d (klucz prywatny):").pack()
+            ttk.Entry(self.current_frame, textvariable=d_text, width=90, state="readonly").pack(pady=1, fill='x')
+
             ttk.Label(self.current_frame, text="Dane wejściowe:").pack()
-            ttk.Entry(self.current_frame, textvariable=input_data, width=54).pack(pady=2)
+            ttk.Entry(self.current_frame, textvariable=input_data, width=70).pack(pady=2)
+
             container = ttk.Frame(self.current_frame)
             container.pack(pady=2)
             ttk.Button(container, text="Szyfruj", command=rsa_encrypt).pack(side='left', padx=8)
             ttk.Button(container, text="Odszyfruj", command=rsa_decrypt).pack(side='left', padx=8)
+
             ttk.Label(self.current_frame, text="Wynik:").pack()
-            result_text = tk.Text(self.current_frame, wrap='word', height=9, width=60)
+            result_text = tk.Text(self.current_frame, wrap='word', height=9, width=80)
             result_text.pack(pady=4, fill='both', expand=True)
             result_text.config(state='disabled')
             ttk.Button(self.current_frame, text="Zapisz wynik do pliku", command=save_result).pack(pady=8)

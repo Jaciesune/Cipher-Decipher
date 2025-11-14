@@ -541,6 +541,7 @@ class EncryptionApp(tk.Tk):
         ttk.Button(self.current_frame, text="Szyfr Beaufort'a", command=self.show_beaufort_cipher).pack(pady=8)
         ttk.Button(self.current_frame, text="Szyfr z kluczem bieżącym", command=self.show_running_key_cipher).pack(pady=8)
         ttk.Button(self.current_frame, text="AES", command=self.show_aes_cipher).pack(pady=8)
+        ttk.Button(self.current_frame, text="RSA", command=self.show_rsa_cipher).pack(pady=8)
 
     def show_caesar_cipher(self):
         self.show_cipher_frame("Caesar Cipher")
@@ -557,16 +558,93 @@ class EncryptionApp(tk.Tk):
     def show_aes_cipher(self):
         self.show_cipher_frame("AES")
 
+    def show_rsa_cipher(self):
+        self.show_cipher_frame("RSA")
+
     def show_cipher_frame(self, cipher_name):
         if self.current_frame:
             self.current_frame.destroy()
         self.current_frame = ttk.Frame(self)
         self.current_frame.pack(expand=True, fill='both')
+        input_data = tk.StringVar()
 
         # Przycisk powrotu na górze
         ttk.Button(self.current_frame, text="Wróć", command=self.show_menu).pack(anchor='nw', padx=5, pady=5)
 
-        input_data = tk.StringVar()
+        if cipher_name == "RSA":
+            bits_var = tk.IntVar(value=256)
+            key_text = tk.StringVar()
+            rsa_obj = [None]
+
+            def generate_keys():
+                try:
+                    rsa = RSA(bits=bits_var.get())
+                    pubkey = rsa.public_key()
+                    privkey = rsa.private_key()
+                    key_info = f"Publiczny:\nn={pubkey[0]}\ne={pubkey[1]}\n\nPrywatny:\nd={privkey[1]}"
+                    key_text.set(key_info)
+                    rsa_obj[0] = rsa
+                except Exception as e:
+                    messagebox.showerror("Błąd", f"Błąd generowania kluczy: {e}")
+
+            def rsa_encrypt():
+                try:
+                    if not rsa_obj[0]:
+                        raise Exception("Brak wygenerowanego klucza!")
+                    text = input_data.get()
+                    encrypted = rsa_obj[0].encrypt(text)
+                    result_text.config(state='normal')
+                    result_text.delete('1.0', tk.END)
+                    print(encrypted, type(encrypted))
+                    result_text.insert(tk.END, ",".join(map(str, encrypted)))
+                    result_text.config(state='disabled')
+                except Exception as e:
+                    messagebox.showerror("Błąd", str(e))
+
+            def rsa_decrypt():
+                try:
+                    if not rsa_obj[0]:
+                        raise Exception("Brak wygenerowanego klucza!")
+                    ciphertext = input_data.get()
+                    blocks = [int(part.strip()) for part in ciphertext.strip().split(',')]
+                    decrypted = rsa_obj[0].decrypt(blocks)
+                    result_text.config(state='normal')
+                    result_text.delete('1.0', tk.END)
+                    result_text.insert(tk.END, decrypted)
+                    result_text.config(state='disabled')
+                except Exception as e:
+                    messagebox.showerror("Błąd", str(e))
+
+            def save_result():
+                file_path = filedialog.asksaveasfilename(defaultextension=".txt",
+                    filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")])
+                if file_path:
+                    try:
+                        content = result_text.get("1.0", tk.END).strip()
+                        with open(file_path, 'w', encoding='utf-8') as f:
+                            f.write(content)
+                        messagebox.showinfo("Zapisano", f"Wynik został zapisany do pliku: {file_path}")
+                    except Exception as e:
+                        messagebox.showerror("Błąd", f"Nie można zapisać pliku. {e}")
+
+            ttk.Label(self.current_frame, text="Długość klucza (bity):").pack()
+            ttk.Entry(self.current_frame, textvariable=bits_var, width=8).pack(pady=2)
+            ttk.Button(self.current_frame, text="Generuj klucze", command=generate_keys).pack(pady=2)
+            ttk.Label(self.current_frame, text="Parametry klucza:").pack()
+            ttk.Entry(self.current_frame, textvariable=key_text, width=60, state="readonly").pack(pady=2, fill='x')
+            ttk.Label(self.current_frame, text="Dane wejściowe:").pack()
+            ttk.Entry(self.current_frame, textvariable=input_data, width=54).pack(pady=2)
+            container = ttk.Frame(self.current_frame)
+            container.pack(pady=2)
+            ttk.Button(container, text="Szyfruj", command=rsa_encrypt).pack(side='left', padx=8)
+            ttk.Button(container, text="Odszyfruj", command=rsa_decrypt).pack(side='left', padx=8)
+            ttk.Label(self.current_frame, text="Wynik:").pack()
+            result_text = tk.Text(self.current_frame, wrap='word', height=9, width=60)
+            result_text.pack(pady=4, fill='both', expand=True)
+            result_text.config(state='disabled')
+            ttk.Button(self.current_frame, text="Zapisz wynik do pliku", command=save_result).pack(pady=8)
+            return
+
         shift_var = tk.IntVar(value=3)
         mode_var = tk.StringVar(value="encrypt")
 

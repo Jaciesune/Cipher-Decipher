@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import messagebox, filedialog
 from tkinter import ttk
+import random
+import math
 
 class CipherAlgorithm: # klasa bazowa
     def encrypt(self, text):
@@ -173,7 +175,64 @@ def ghash(H, A, C):
     return X
 
 
+#Funkcje dla RSA
+
+def is_prime(n, k=8):
+    if n < 2:
+        return False
+    for p in [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]:
+        if n % p == 0:
+            return n == p
+    # Miller-Rabin test
+    d, s = n - 1, 0
+    while d % 2 == 0:
+        d //= 2
+        s += 1
+    for _ in range(k):
+        a = random.randrange(2, n - 2)
+        x = pow(a, d, n)
+        if x == 1 or x == n - 1:
+            continue
+        for _ in range(s - 1):
+            x = pow(x, 2, n)
+            if x == n - 1:
+                break
+        else:
+            return False
+    return True
+
+def generate_prime(bits):
+    while True:
+        num = random.getrandbits(bits)
+        num |= 1 << bits - 1 | 1  # zapewnij odpowiedni rozmiar i nieparzystość
+        if is_prime(num):
+            return num
+
+def gcd(a, b):
+    while b:
+        a, b = b, a % b
+    return a
+
+def modinv(a, m):
+    # Extended Euclidean Algorithm
+    g, x, y = extended_gcd(a, m)
+    if g != 1:
+        raise Exception('Brak odwrotności modulo')
+    return x % m
+
+def extended_gcd(a, b):
+    if a == 0:
+        return b, 0, 1
+    else:
+        g, y, x = extended_gcd(b % a, a)
+        return g, x - (b // a) * y, y
+
 # -------------------------------------- #
+
+# RSA 
+
+
+# -- RSA -- #
 
 class AES_ECB(CipherAlgorithm):
     def __init__(self, key):

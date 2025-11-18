@@ -227,7 +227,38 @@ def extended_gcd(a, b):
         g, y, x = extended_gcd(b % a, a)
         return g, x - (b // a) * y, y
 
+# okno szczegółów logu
+def show_details_window(content):
+    details_win = tk.Toplevel()
+    details_win.title("Szczegóły logu")
+    details_win.geometry("620x420")
+    text_widget = tk.Text(details_win, wrap='word')
+    text_widget.pack(side="left", fill="both", expand=True)
+    text_widget.insert("1.0", content)
+    text_widget.config(state="disabled")
+    scrollbar = ttk.Scrollbar(details_win, orient="vertical", command=text_widget.yview)
+    scrollbar.pack(side="right", fill="y")
+    text_widget.config(yscrollcommand=scrollbar.set)
+
 # -------------------------------------- #
+
+# Logger
+class Logger:
+    def __init__(self):
+        self.entries = []
+
+    def add(self, operation, cipher_name, input_data, result, details=None):
+        entry = {
+            "operation": operation,
+            "cipher": cipher_name,
+            "input": input_data,
+            "result": result,
+            "details": details or {}
+        }
+        self.entries.append(entry)
+
+    def get_entries(self):
+        return self.entries
 
 # RSA 
 
@@ -434,27 +465,39 @@ class AES_GCM(CipherAlgorithm):
             raise ValueError("Tag/MAC niezgodny — dane podrobione lub z błędem!")
         return plaintext_bytes
 
-class CaesarCipher(CipherAlgorithm): #Szyfr Cezara
+# szyfr cezara
+
+class CaesarCipher(CipherAlgorithm):
     def __init__(self, shift=3):
         self.shift = shift
+
     def encrypt(self, text):
         result = ''
-        for char in text:
+        steps = []
+        for idx, char in enumerate(text):
             if char.isalpha():
                 stay_in_alphabet = ord('A') if char.isupper() else ord('a')
-                result += chr((ord(char)-stay_in_alphabet + self.shift) % 26 + stay_in_alphabet)
+                coded_char = chr((ord(char)-stay_in_alphabet + self.shift) % 26 + stay_in_alphabet)
+                result += coded_char
+                steps.append(f"{idx+1}. '{char}' -> '{coded_char}'")
             else:
                 result += char
-        return result
+                steps.append(f"{idx+1}. '{char}' (bez zmian: nie alfabet)")
+        return result, steps
+
     def decrypt(self, text):
         result = ''
-        for char in text:
+        steps = []
+        for idx, char in enumerate(text):
             if char.isalpha():
                 stay_in_alphabet = ord('A') if char.isupper() else ord('a')
-                result += chr((ord(char)-stay_in_alphabet - self.shift) % 26 + stay_in_alphabet)
+                decoded_char = chr((ord(char)-stay_in_alphabet - self.shift) % 26 + stay_in_alphabet)
+                result += decoded_char
+                steps.append(f"{idx+1}. '{char}' -> '{decoded_char}'")
             else:
                 result += char
-        return result
+                steps.append(f"{idx+1}. '{char}' (bez zmian: nie alfabet)")
+        return result, steps
 
 class ReverseCipher(CipherAlgorithm): #Szyfr odwracający ciąg znaków
     def encrypt(self, text):
@@ -523,17 +566,25 @@ class EncryptionApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Aplikacja szyfrująca")
-        self.geometry("640x540")
+        self.geometry("700x600")
         self.minsize(540, 540)
+        self.logger = Logger()
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(expand=True, fill='both')
+        self.main_frame = ttk.Frame(self.notebook)
+        self.log_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.main_frame, text='Szyfruj/Odszyfruj')
+        self.notebook.add(self.log_frame, text='Logi')
         self.current_frame = None
         style = ttk.Style(self)
         style.theme_use('clam')
         self.show_menu()
+        self.update_logs_display()
 
     def show_menu(self):
         if self.current_frame:
             self.current_frame.destroy()
-        self.current_frame = ttk.Frame(self)
+        self.current_frame = ttk.Frame(self.main_frame)
         self.current_frame.pack(expand=True, fill='both')
         ttk.Label(self.current_frame, text="Wybierz szyfr", font=("Arial", 18)).pack(pady=44)
         ttk.Button(self.current_frame, text="Szyfr Cezara", command=self.show_caesar_cipher).pack(pady=16)
@@ -561,10 +612,44 @@ class EncryptionApp(tk.Tk):
     def show_rsa_cipher(self):
         self.show_cipher_frame("RSA")
 
+    # Funkcja wypisywania logów
+    def update_logs_display(self):
+        for widget in self.log_frame.winfo_children():
+            widget.destroy()
+        ttk.Label(self.log_frame, text="Historia operacji:").pack(anchor="nw")
+        
+        log_frame_inner = ttk.Frame(self.log_frame)
+        log_frame_inner.pack(fill="both", expand=True)
+
+        log_list = tk.Listbox(log_frame_inner, height=20)
+        scrollbar = ttk.Scrollbar(log_frame_inner, orient="vertical", command=log_list.yview)
+        log_list.config(yscrollcommand=scrollbar.set)
+        log_list.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        for i, entry in enumerate(self.logger.get_entries()):
+            log_list.insert(tk.END, f'[{i+1}] {entry["operation"]} ({entry["cipher"]})')
+        
+        def show_details(event):
+            index = log_list.curselection()
+            if index:
+                entry = self.logger.get_entries()[index[0]]
+                steps = entry["details"].get("steps", [])
+                steps_str = "\n".join(steps)
+                details = (
+                    f'\n ###Operacja###: {entry["operation"]}\n'
+                    f'\n ###Szyfr###: {entry["cipher"]}\n'
+                    f'\n ###Przesunięcie###: {entry["details"].get("shift", "")}\n'
+                    f'\n ###Wejście###: {entry["input"]}\n'
+                    f'\n ###Wynik###: {entry["result"]}\n'
+                    + ("\n\nKroki:\n" + steps_str if steps_str else "")
+                )
+                show_details_window(details)
+        log_list.bind('<Double-Button-1>', show_details)
+
     def show_cipher_frame(self, cipher_name):
         if self.current_frame:
             self.current_frame.destroy()
-        self.current_frame = ttk.Frame(self)
+        self.current_frame = ttk.Frame(self.main_frame)
         self.current_frame.pack(expand=True, fill='both')
         input_data = tk.StringVar()
 
@@ -719,7 +804,25 @@ class EncryptionApp(tk.Tk):
                 return
             try:
                 if cipher_name == "Caesar Cipher":
-                    algo = CaesarCipher(shift_var.get())
+                    if mode_var.get() == "encrypt":
+                        result, steps = CaesarCipher(shift_var.get()).encrypt(text)
+                    else:
+                        result, steps = CaesarCipher(shift_var.get()).decrypt(text)
+                    # Logowanie
+                    self.logger.add(
+                        operation="Szyfrowanie" if mode_var.get() == "encrypt" else "Deszyfrowanie",
+                        cipher_name="Caesar Cipher",
+                        input_data=text,
+                        result=result,
+                        details={"shift": shift_var.get(), "steps": steps}
+                    )
+                    self.update_logs_display()
+                    result_text.config(state='normal')
+                    result_text.delete('1.0', tk.END)
+                    result_text.insert(tk.END, result)
+                    result_text.config(state='disabled')
+                    return # przerwanie w celu zatrzymania innych trybów
+                
                 elif cipher_name == "Reverse Cipher":
                     algo = ReverseCipher()
                 elif cipher_name == "Beaufort Cipher":
@@ -780,6 +883,7 @@ class EncryptionApp(tk.Tk):
                                 else:
                                     messagebox.showerror("Błąd", "Podaj szyfrogram oraz tag poprawnie (sklejone HEX + 'TAG:hex').")
                                     return
+                            
                             result_text.config(state='normal')
                             result_text.delete('1.0', tk.END)
                             result_text.insert(tk.END, result)
@@ -806,6 +910,16 @@ class EncryptionApp(tk.Tk):
                     except Exception as e:
                         messagebox.showerror("Błąd", f"Nieprawidłowe dane lub algorytm. {e}")
                         return
+
+                #Logowanie    
+                self.logger.add(
+                    operation="Szyfrowanie" if mode_var.get() == "encrypt" else "Deszyfrowanie",
+                    cipher_name=cipher_name,
+                    input_data=text,
+                    result=result,
+                    details={"key": key_var.get() if cipher_name in ["Beaufort Cipher", "Running Key Cipher"] else ""}
+                )
+                self.update_logs_display()
 
                 result = algo.encrypt(text) if mode_var.get() == "encrypt" else algo.decrypt(text)
                 result_text.config(state='normal')

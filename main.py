@@ -327,11 +327,23 @@ class ECDHCipherAlgorithm(CipherAlgorithm):
         self.shared_secret = self.curve.scalar_mult(self.private_key, peer_public_key)
         return self.shared_secret
 
-    def encrypt(self, text):
-        raise NotImplementedError("ECDH nie służy do szyfrowania tekstu")
+    def encrypt(self, plaintext, peer_public_key_text, return_steps=False):
+        peer_public_key = self.load_peer_public_key(peer_public_key_text)
+        shared_secret = self.compute_shared_secret(peer_public_key)
+        key = shared_secret[0] % 256 
+        ciphertext = ''.join(chr(ord(c) ^ key) for c in plaintext)
+        steps = [
+            f'Wspólny sekret: ({shared_secret[0]}, {shared_secret[1]})',
+            f'Klucz do XOR: {key}',
+            f'Wiadomość wejściowa: {plaintext}',
+            f'Wiadomość zaszyfrowana: {[ord(x) for x in ciphertext]}'
+        ]
+        if return_steps:
+            return ciphertext, steps, shared_secret
+        return ciphertext
 
-    def decrypt(self, text):
-        raise NotImplementedError("ECDH nie służy do deszyfrowania tekstu")
+    def decrypt(self, ciphertext, peer_public_key_text, return_steps=False):
+        return self.encrypt(ciphertext, peer_public_key_text, return_steps)
 
 
 #-- ECDH --#
@@ -779,6 +791,58 @@ class EncryptionApp(tk.Tk):
             except Exception as e:
                 messagebox.showerror("Błąd", str(e))
 
+        input_message = tk.StringVar()
+        peer_pubkey_text = tk.StringVar()
+        result_cipher = tk.StringVar()
+
+        def encrypt_message():
+            if not ecdh_obj[0]:
+                generate_my_keys()
+            msg = input_message.get()
+            peer_pub = peer_pubkey_text.get()
+            if not msg or not peer_pub:
+                messagebox.showerror("Błąd", "Uzupełnij wiadomość i klucz publiczny partnera!")
+                return
+            ciphertext, steps, shared = ecdh_obj[0].encrypt(msg, peer_pub, return_steps=True)
+            result_cipher.set(''.join(['{:02x}'.format(ord(c)) for c in ciphertext]))  # hex
+            self.logger.add(
+                operation="Szyfrowanie",
+                cipher_name="ECDH",
+                input_data=msg,
+                result=result_cipher.get(),
+                details={
+                    "my_pubkey": ecdh_obj[0].get_public_key_text(),
+                    "peer_pubkey": peer_pub,
+                    "shared_secret": shared,
+                    "steps": steps
+                })
+            self.update_logs_display()
+
+        def decrypt_message():
+            if not ecdh_obj[0]:
+                generate_my_keys()
+            cipher_hex = input_message.get()
+            try:
+                cipher_bytes = bytes.fromhex(cipher_hex)
+                cipher_str = ''.join([chr(b) for b in cipher_bytes])
+            except Exception:
+                messagebox.showerror("Błąd", "Błąd formatu HEX!")
+                return
+            peer_pub = peer_pubkey_text.get()
+            plaintext, steps, shared = ecdh_obj[0].decrypt(cipher_str, peer_pub, return_steps=True)
+            result_cipher.set(plaintext)
+            self.logger.add(
+                operation="Deszyfrowanie",
+                cipher_name="ECDH",
+                input_data=input_message.get(),
+                result=plaintext,
+                details={
+                    "my_pubkey": ecdh_obj[0].get_public_key_text(),
+                    "peer_pubkey": peer_pub,
+                    "shared_secret": shared,
+                    "steps": steps
+                })
+            self.update_logs_display()
         # GUI
         ttk.Button(self.current_frame, text="Generuj moją parę kluczy", command=generate_my_keys).pack(pady=4)
         ttk.Label(self.current_frame, text="Twój klucz publiczny (HEX):").pack()
@@ -790,6 +854,18 @@ class EncryptionApp(tk.Tk):
 
         ttk.Label(self.current_frame, text="Obliczony wspólny sekret (HEX):").pack()
         ttk.Entry(self.current_frame, textvariable=secret_text, width=94, state="readonly").pack(pady=2, fill='x')
+
+        ttk.Label(self.current_frame, text="Wiadomość do zaszyfrowania / odszyfrowania:").pack(pady=4)
+        ttk.Entry(self.current_frame, textvariable=input_message, width=80).pack(pady=2, fill='x')
+
+        result_label = ttk.Label(self.current_frame, text="Wynik (hex dla szyfrowania / tekst dla deszyfrowania):")
+        result_label.pack(pady=2)
+        ttk.Entry(self.current_frame, textvariable=result_cipher, width=80, state="readonly").pack(pady=2, fill='x')
+
+        container = ttk.Frame(self.current_frame)
+        container.pack(pady=6)
+        ttk.Button(container, text="Szyfruj", command=encrypt_message).pack(side='left', padx=12)
+        ttk.Button(container, text="Odszyfruj", command=decrypt_message).pack(side='left', padx=12)
 
     # Funkcja wypisywania logów
     def update_logs_display(self):
@@ -865,6 +941,14 @@ class EncryptionApp(tk.Tk):
                     result_text.delete('1.0', tk.END)
                     result_text.insert(tk.END, ",".join(map(str, encrypted)))
                     result_text.config(state='disabled')
+                    self.logger.add(
+                        operation="Szyfrowanie",
+                        cipher_name="RSA",
+                        input_data=text,
+                        result=encrypted,
+                        details={"n": n_text.get(), "e": e_text.get()}
+                    )
+                    self.update_logs_display()
                 except Exception as e:
                     messagebox.showerror("Błąd", str(e))
 
@@ -879,6 +963,14 @@ class EncryptionApp(tk.Tk):
                     result_text.delete('1.0', tk.END)
                     result_text.insert(tk.END, decrypted)
                     result_text.config(state='disabled')
+                    self.logger.add(
+                        operation="Deszyfrowanie",
+                        cipher_name="RSA",
+                        input_data=ciphertext,     # wejście (zaszyfrowany tekst)
+                        result=decrypted,          # wynik (odszyfrowany tekst)
+                        details={"n": n_text.get(), "d": d_text.get()}
+                    )
+                    self.update_logs_display()
                 except Exception as e:
                     messagebox.showerror("Błąd", str(e))
 

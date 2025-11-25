@@ -204,7 +204,7 @@ def is_prime(n, k=8):
 def generate_prime(bits):
     while True:
         num = random.getrandbits(bits)
-        num |= 1 << bits - 1 | 1  # zapewnij odpowiedni rozmiar i nieparzystość
+        num |= 1 << bits - 1 | 1  # zapewnia odpowiedni rozmiar i nieparzystość
         if is_prime(num):
             return num
 
@@ -241,6 +241,100 @@ def show_details_window(content):
     text_widget.config(yscrollcommand=scrollbar.set)
 
 # -------------------------------------- #
+
+# ECDH #
+
+class EllipticCurve:
+    def __init__(self, p, a, b):
+        self.p = p
+        self.a = a
+        self.b = b
+
+    def is_on_curve(self, x, y):
+        return (y*y - (x*x*x + self.a*x + self.b)) % self.p == 0
+
+    def point_add(self, P, Q):
+        if P is None:
+            return Q
+        if Q is None:
+            return P
+        x1, y1 = P
+        x2, y2 = Q
+        if x1 == x2 and y1 != y2:
+            return None
+        if P == Q:
+            s = (3 * x1 * x1 + self.a) * self.modinv(2 * y1, self.p) % self.p
+        else:
+            s = (y2 - y1) * self.modinv(x2 - x1, self.p) % self.p
+        x3 = (s * s - x1 - x2) % self.p
+        y3 = (s * (x1 - x3) - y1) % self.p
+        return (x3, y3)
+
+    def scalar_mult(self, k, P):
+        result = None
+        addend = P
+        while k:
+            if k & 1:
+                result = self.point_add(result, addend)
+            addend = self.point_add(addend, addend)
+            k >>= 1
+        return result
+
+    def modinv(self, a, m):
+        g, x, y = self.egcd(a, m)
+        if g != 1:
+            raise Exception('Brak odwrotności')
+        return x % m
+
+    def egcd(self, a, b):
+        if a == 0:
+            return (b, 0, 1)
+        else:
+            g, y, x = self.egcd(b % a, a)
+            return (g, x - (b//a) * y, y)
+        
+class ECDHCipherAlgorithm(CipherAlgorithm):
+    def __init__(self, curve, generator):
+        self.curve = curve
+        self.G = generator
+        self.private_key = None
+        self.public_key = None
+        self.shared_secret = None
+
+    def generate_keys(self):
+        # Generuje klucz prywatny i publiczny
+        self.private_key = random.randint(1, self.curve.p - 1)
+        self.public_key = self.curve.scalar_mult(self.private_key, self.G)
+
+    def get_public_key_text(self):
+        # Zwraca klucz publiczny jako tekst (hex)
+        if not self.public_key:
+            raise Exception("Klucz publiczny nie został wygenerowany")
+        x, y = self.public_key
+        return f"{x:0{self.curve.p.bit_length()//4}x},{y:0{self.curve.p.bit_length()//4}x}"
+
+    def load_peer_public_key(self, peer_text):
+        # Parsuje tekstowy klucz publiczny partnera
+        x_hex, y_hex = peer_text.split(',')
+        x = int(x_hex, 16)
+        y = int(y_hex, 16)
+        if not self.curve.is_on_curve(x, y):
+            raise Exception("Klucz publiczny nie leży na krzywej!")
+        return (x, y)
+
+    def compute_shared_secret(self, peer_public_key):
+        # Liczy wspólny sekret
+        self.shared_secret = self.curve.scalar_mult(self.private_key, peer_public_key)
+        return self.shared_secret
+
+    def encrypt(self, text):
+        raise NotImplementedError("ECDH nie służy do szyfrowania tekstu")
+
+    def decrypt(self, text):
+        raise NotImplementedError("ECDH nie służy do deszyfrowania tekstu")
+
+
+#-- ECDH --#
 
 # Logger
 class Logger:
@@ -500,17 +594,27 @@ class CaesarCipher(CipherAlgorithm):
         return result, steps
 
 class ReverseCipher(CipherAlgorithm): #Szyfr odwracający ciąg znaków
-    def encrypt(self, text):
-        return text[::-1]
-    def decrypt(self, text):
-        return text[::-1]
+    def encrypt(self, text, return_steps=False):
+        result = text[::-1]
+        steps = [f"Wejściowy tekst: {text}", f"Tekst po odwróceniu: {result}"]
+        if return_steps:
+            return result, steps
+        return result
+
+    def decrypt(self, text, return_steps=False):
+        result = text[::-1]
+        steps = [f"Wejściowy tekst: {text}", f"Tekst po odwróceniu: {result}"]
+        if return_steps:
+            return result, steps
+        return result
     
-class BeaufortCipher(CipherAlgorithm): #Szyfr Beaufort'a
+class BeaufortCipher(CipherAlgorithm): # Szyfr Beaufort'a
     def __init__(self, key):
         self.key = key
 
-    def _process(self, text, encrypt=True):
+    def _process(self, text, encrypt=True, return_steps=False):
         result = ''
+        steps = []
         key = self.key
         key_len = len(key)
         for i, char in enumerate(text):
@@ -519,23 +623,29 @@ class BeaufortCipher(CipherAlgorithm): #Szyfr Beaufort'a
                 p = ord(char.upper()) - ord('A')
                 k = ord(key[i % key_len].upper()) - ord('A')
                 c = (k - p) % 26
-                result += chr(c + stay_in_alphabet)
+                mapped = chr(c + stay_in_alphabet)
+                result += mapped
+                steps.append(f'{char} (poz.{i}): (key={key[i%key_len]}) k={k}, p={p} ➔ {mapped}')
             else:
                 result += char
+                steps.append(f'{char} - bez zmian')
+        if return_steps:
+            return result, steps
         return result
 
-    def encrypt(self, text):
-        return self._process(text)
+    def encrypt(self, text, return_steps=False):
+        return self._process(text, encrypt=True, return_steps=return_steps)
 
-    def decrypt(self, text):
-        return self._process(text)
+    def decrypt(self, text, return_steps=False):
+        return self._process(text, encrypt=False, return_steps=return_steps)
 
 class RunningKeyCipher(CipherAlgorithm):
     def __init__(self, key):
         self.key = key
-    
-    def encrypt(self, text):
+
+    def encrypt(self, text, return_steps=False):
         result = ""
+        steps = []
         key = self.key
         for i, char in enumerate(text):
             if char.isalpha():
@@ -543,13 +653,19 @@ class RunningKeyCipher(CipherAlgorithm):
                 pi = ord(char.upper()) - ord('A')
                 ki = ord(key[i % len(key)].upper()) - ord('A')
                 ci = (pi + ki) % 26
-                result += chr(ci + stay_in_alphabet)
+                mapped = chr(ci + stay_in_alphabet)
+                result += mapped
+                steps.append(f'{char} (poz.{i}): (key={key[i%len(key)]}) pi={pi} ki={ki} ➔ {mapped}')
             else:
                 result += char
+                steps.append(f'{char} - bez zmian')
+        if return_steps:
+            return result, steps
         return result
-    
-    def decrypt(self, text):
+
+    def decrypt(self, text, return_steps=False):
         result = ""
+        steps = []
         key = self.key
         for i, char in enumerate(text):
             if char.isalpha():
@@ -557,9 +673,14 @@ class RunningKeyCipher(CipherAlgorithm):
                 pi = ord(char.upper()) - ord('A')
                 ki = ord(key[i % len(key)].upper()) - ord('A')
                 ci = (pi - ki) % 26
-                result += chr(ci + stay_in_alphabet)
+                mapped = chr(ci + stay_in_alphabet)
+                result += mapped
+                steps.append(f'{char} (poz.{i}): (key={key[i%len(key)]}) pi={pi} ki={ki} ➔ {mapped}')
             else:
                 result += char
+                steps.append(f'{char} - bez zmian')
+        if return_steps:
+            return result, steps
         return result
 
 class EncryptionApp(tk.Tk):
@@ -593,6 +714,7 @@ class EncryptionApp(tk.Tk):
         ttk.Button(self.current_frame, text="Szyfr z kluczem bieżącym", command=self.show_running_key_cipher).pack(pady=8)
         ttk.Button(self.current_frame, text="AES", command=self.show_aes_cipher).pack(pady=8)
         ttk.Button(self.current_frame, text="RSA", command=self.show_rsa_cipher).pack(pady=8)
+        ttk.Button(self.current_frame, text="ECDH", command=self.show_ecdh_cipher).pack(pady=8)
 
     def show_caesar_cipher(self):
         self.show_cipher_frame("Caesar Cipher")
@@ -611,6 +733,63 @@ class EncryptionApp(tk.Tk):
 
     def show_rsa_cipher(self):
         self.show_cipher_frame("RSA")
+
+    def show_ecdh_cipher(self):
+        if self.current_frame:
+            self.current_frame.destroy()
+        self.current_frame = ttk.Frame(self.main_frame)
+        self.current_frame.pack(expand=True, fill='both')
+
+        ttk.Button(self.current_frame, text="Wróć", command=self.show_menu).pack(anchor='nw', padx=5, pady=5)
+        ttk.Label(self.current_frame, text="[ECDH] Wymiana klucza DH na krzywych eliptycznych", font=("Arial", 15)).pack(pady=12)
+
+        # Parametry krzywej, generator, algorytm
+        p = 0xfffffffffffffffffffffffffffffffeffffffffffffffff
+        a, b = 0, 3
+        curve = EllipticCurve(p, a, b)
+        G = (
+            0xDB4FF10EC057E9AE26B07D0280B7F4341DA5D1B1EAE06C7D,
+            0x9B2F2F6D9C5628A784416C19C4B1FE649286651ECE45B3DC
+        )
+        ecdh_obj = [None]
+        my_pubkey_text = tk.StringVar()
+        peer_pubkey_text = tk.StringVar()
+        secret_text = tk.StringVar()
+
+        def generate_my_keys():
+            ecdh = ECDHCipherAlgorithm(curve, G)
+            ecdh.generate_keys()
+            ecdh_obj[0] = ecdh
+            my_pubkey_text.set(ecdh.get_public_key_text())
+            secret_text.set("")
+            messagebox.showinfo("Sukces", "Wygenerowano nowe klucze ECDH.")
+
+        def compute_shared_key():
+            try:
+                if not ecdh_obj[0]:
+                    raise Exception("Brak Twojego klucza! Najpierw wygeneruj parę.")
+                peer_pubkey = ecdh_obj[0].load_peer_public_key(peer_pubkey_text.get())
+                shared = ecdh_obj[0].compute_shared_secret(peer_pubkey)
+                if shared:
+                    x, y = shared
+                    secret_text.set(f"{x:0{curve.p.bit_length()//4}x},{y:0{curve.p.bit_length()//4}x}")
+                else:
+                    secret_text.set("")
+                    messagebox.showwarning("Ostrzeżenie", "Nie udało się obliczyć wspólnego sekretu.")
+            except Exception as e:
+                messagebox.showerror("Błąd", str(e))
+
+        # GUI
+        ttk.Button(self.current_frame, text="Generuj moją parę kluczy", command=generate_my_keys).pack(pady=4)
+        ttk.Label(self.current_frame, text="Twój klucz publiczny (HEX):").pack()
+        ttk.Entry(self.current_frame, textvariable=my_pubkey_text, width=94, state="readonly").pack(pady=2, fill='x')
+
+        ttk.Label(self.current_frame, text="Klucz publiczny partnera (HEX):").pack()
+        ttk.Entry(self.current_frame, textvariable=peer_pubkey_text, width=94).pack(pady=2, fill='x')
+        ttk.Button(self.current_frame, text="Oblicz wspólny sekret", command=compute_shared_key).pack(pady=6)
+
+        ttk.Label(self.current_frame, text="Obliczony wspólny sekret (HEX):").pack()
+        ttk.Entry(self.current_frame, textvariable=secret_text, width=94, state="readonly").pack(pady=2, fill='x')
 
     # Funkcja wypisywania logów
     def update_logs_display(self):
@@ -823,20 +1002,58 @@ class EncryptionApp(tk.Tk):
                     result_text.config(state='disabled')
                     return # przerwanie w celu zatrzymania innych trybów
                 
-                elif cipher_name == "Reverse Cipher":
+                if cipher_name == "Reverse Cipher":
                     algo = ReverseCipher()
+                    result, steps = algo.encrypt(text, return_steps=True) if mode_var.get() == "encrypt" else algo.decrypt(text, return_steps=True)
+                    self.logger.add(
+                        operation="Szyfrowanie" if mode_var.get() == "encrypt" else "Deszyfrowanie",
+                        cipher_name=cipher_name,
+                        input_data=text,
+                        result=result,
+                        details={
+                            "key": key if cipher_name in ["Beaufort Cipher", "Running Key Cipher"] else "",
+                            "steps": steps
+                        }
+                    )
+                    self.update_logs_display()
+
                 elif cipher_name == "Beaufort Cipher":
                     key = key_var.get()
                     if not key.isalpha() or not key:
                         messagebox.showerror("Błąd", "Klucz musi być niepusty i alfabetyczny.")
                         return
                     algo = BeaufortCipher(key)
+                    result, steps = algo.encrypt(text, return_steps=True) if mode_var.get() == "encrypt" else algo.decrypt(text, return_steps=True)
+                    self.logger.add(
+                        operation="Szyfrowanie" if mode_var.get() == "encrypt" else "Deszyfrowanie",
+                        cipher_name=cipher_name,
+                        input_data=text,
+                        result=result,
+                        details={
+                            "key": key if cipher_name in ["Beaufort Cipher", "Running Key Cipher"] else "",
+                            "steps": steps
+                        }
+                    )
+                    self.update_logs_display()
+
                 elif cipher_name == "Running Key Cipher":
                     key = key_var.get()
                     if len(key) < len(text) or not key.isalpha():
                         messagebox.showerror("Błąd", "Klucz musi być alfabetyczny i nie krótszy niż wiadomość.")
                         return
                     algo = RunningKeyCipher(key)
+                    result, steps = algo.encrypt(text, return_steps=True) if mode_var.get() == "encrypt" else algo.decrypt(text, return_steps=True)
+                    self.logger.add(
+                        operation="Szyfrowanie" if mode_var.get() == "encrypt" else "Deszyfrowanie",
+                        cipher_name=cipher_name,
+                        input_data=text,
+                        result=result,
+                        details={
+                            "key": key if cipher_name in ["Beaufort Cipher", "Running Key Cipher"] else "",
+                            "steps": steps
+                        }
+                    )
+                    self.update_logs_display()
 
                 elif cipher_name == "AES":
                     try:
@@ -911,17 +1128,15 @@ class EncryptionApp(tk.Tk):
                         messagebox.showerror("Błąd", f"Nieprawidłowe dane lub algorytm. {e}")
                         return
 
-                #Logowanie    
-                self.logger.add(
-                    operation="Szyfrowanie" if mode_var.get() == "encrypt" else "Deszyfrowanie",
-                    cipher_name=cipher_name,
-                    input_data=text,
-                    result=result,
-                    details={"key": key_var.get() if cipher_name in ["Beaufort Cipher", "Running Key Cipher"] else ""}
-                )
-                self.update_logs_display()
-
-                result = algo.encrypt(text) if mode_var.get() == "encrypt" else algo.decrypt(text)
+                if hasattr(algo, "encrypt") and "return_steps" in algo.encrypt.__code__.co_varnames:
+                    if mode_var.get() == "encrypt":
+                        result, steps = algo.encrypt(text, return_steps=True)
+                    else:
+                        result, steps = algo.decrypt(text, return_steps=True)
+                else:
+                    # fallback dla starych/szczególnych algorytmów
+                    result = algo.encrypt(text) if mode_var.get() == "encrypt" else algo.decrypt(text)
+                    steps = []
                 result_text.config(state='normal')
                 result_text.delete('1.0', tk.END)
                 result_text.insert(tk.END, result)

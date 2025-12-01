@@ -251,28 +251,51 @@ class EllipticCurve:
         self.b = b
 
     def is_on_curve(self, x, y):
-        return (y*y - (x*x*x + self.a*x + self.b)) % self.p == 0
+        # Sprawdzenie równania krzywej: y^2 = x^3 + a*x + b (mod p)
+        return (y * y - (x * x * x + self.a * x + self.b)) % self.p == 0
 
     def point_add(self, P, Q):
+        # Obsługa punktu w nieskończoności
         if P is None:
             return Q
         if Q is None:
             return P
+
         x1, y1 = P
         x2, y2 = Q
-        if x1 == x2 and y1 != y2:
+
+        # P + (-P) = O (punkt w nieskończoności)
+        if x1 == x2 and (y1 + y2) % self.p == 0:
             return None
+
+        # Wyliczenie licznika i mianownika
         if P == Q:
-            s = (3 * x1 * x1 + self.a) * self.modinv(2 * y1, self.p) % self.p
+            numerator = (3 * x1 * x1 + self.a) % self.p
+            denominator = (2 * y1) % self.p
         else:
-            s = (y2 - y1) * self.modinv(x2 - x1, self.p) % self.p
+            numerator = (y2 - y1) % self.p
+            denominator = (x2 - x1) % self.p
+
+        # Jeśli mianownik == 0, nie ma odwrotności → traktujemy jako punkt w nieskończoności
+        if denominator == 0:
+            return None
+
+        try:
+            inv = self.modinv(denominator, self.p)
+        except Exception:
+            # Brak odwrotności modulo p – również traktujemy jako punkt w nieskończoności
+            return None
+
+        s = (numerator * inv) % self.p
         x3 = (s * s - x1 - x2) % self.p
         y3 = (s * (x1 - x3) - y1) % self.p
         return (x3, y3)
 
     def scalar_mult(self, k, P):
-        result = None
+        # Mnożenie skalarne punktu metodą "double-and-add"
+        result = None  # punkt w nieskończoności
         addend = P
+
         while k:
             if k & 1:
                 result = self.point_add(result, addend)
@@ -281,17 +304,20 @@ class EllipticCurve:
         return result
 
     def modinv(self, a, m):
+        # Odwrotność modularna a^{-1} mod m
+        a = a % m
         g, x, y = self.egcd(a, m)
         if g != 1:
             raise Exception('Brak odwrotności')
         return x % m
 
     def egcd(self, a, b):
+        # Rozszerzony algorytm Euklidesa
         if a == 0:
             return (b, 0, 1)
         else:
             g, y, x = self.egcd(b % a, a)
-            return (g, x - (b//a) * y, y)
+            return (g, x - (b // a) * y, y)
         
 class ECDHCipherAlgorithm(CipherAlgorithm):
     def __init__(self, curve, generator):
@@ -756,12 +782,13 @@ class EncryptionApp(tk.Tk):
         ttk.Label(self.current_frame, text="[ECDH] Wymiana klucza DH na krzywych eliptycznych", font=("Arial", 15)).pack(pady=12)
 
         # Parametry krzywej, generator, algorytm
-        p = 0xfffffffffffffffffffffffffffffffeffffffffffffffff
-        a, b = 0, 3
+        p = int("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFEE37", 16)
+        a = 0
+        b = 3
         curve = EllipticCurve(p, a, b)
         G = (
-            0xDB4FF10EC057E9AE26B07D0280B7F4341DA5D1B1EAE06C7D,
-            0x9B2F2F6D9C5628A784416C19C4B1FE649286651ECE45B3DC
+        int("DB4FF10EC057E9AE26B07D0280B7F4341DA5D1B1EAE06C7D", 16),
+        int("9B2F2F6D9C5628A7844163FEA81E2C9E3BAEEDCE3C4F3D4F", 16),
         )
         ecdh_obj = [None]
         my_pubkey_text = tk.StringVar()

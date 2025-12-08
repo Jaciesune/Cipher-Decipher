@@ -242,6 +242,121 @@ def show_details_window(content):
 
 # -------------------------------------- #
 
+# SHA-256 #
+
+class SHA256(CipherAlgorithm):
+    def __init__(self):
+        self.H = [
+            0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+            0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+        ]
+        self.K = [
+            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+            0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+            0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+            0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+            0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+            0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+            0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+        ]
+
+    def _rotr(self, x, n):
+        """Right rotate o n bitów"""
+        return ((x >> n) | (x << (32 - n))) & 0xFFFFFFFF
+
+    def _ch(self, x, y, z):
+        """Maj"""
+        return (x & y) ^ (~x & z)
+
+    def _maj(self, x, y, z):
+        """Choice"""
+        return (x & y) ^ (x & z) ^ (y & z)
+
+    def _sigma0(self, x):
+        return self._rotr(x, 2) ^ self._rotr(x, 13) ^ self._rotr(x, 22)
+
+    def _sigma1(self, x):
+        return self._rotr(x, 6) ^ self._rotr(x, 11) ^ self._rotr(x, 25)
+
+    def _gamma0(self, x):
+        return self._rotr(x, 7) ^ self._rotr(x, 18) ^ (x >> 3)
+
+    def _gamma1(self, x):
+        return self._rotr(x, 17) ^ self._rotr(x, 19) ^ (x >> 10)
+
+    def _digest(self, data):
+        """Główna funkcja hashowania"""
+        # Konwersja na bajty jeśli string
+        if isinstance(data, str):
+            data = data.encode('utf-8')
+        
+        # Padding
+        orig_len = len(data) * 8
+        data += b'\x80'
+        while (len(data) * 8) % 512 != 448:
+            data += b'\x00'
+        data += orig_len.to_bytes(8, 'big')
+        
+        # Inicjalizacja working variables
+        h = self.H[:]
+        
+        # Przetwarzanie bloków 512-bitowych
+        for i in range(0, len(data), 64):
+            block = data[i:i+64]
+            
+            # Message schedule
+            w = [0] * 64
+            for j in range(16):
+                w[j] = int.from_bytes(block[j*4:(j+1)*4], 'big')
+            
+            for j in range(16, 64):
+                s0 = self._gamma0(w[j-15])
+                s1 = self._gamma1(w[j-2])
+                w[j] = (w[j-16] + s0 + w[j-7] + s1) & 0xFFFFFFFF
+            
+            # Kompresja
+            a, b, c, d, e, f, g, hh = h
+            
+            for j in range(64):
+                S1 = self._sigma1(e)
+                ch = self._ch(e, f, g)
+                temp1 = (hh + S1 + ch + self.K[j] + w[j]) & 0xFFFFFFFF
+                S0 = self._sigma0(a)
+                maj = self._maj(a, b, c)
+                temp2 = (S0 + maj) & 0xFFFFFFFF
+                
+                hh = g
+                g = f
+                f = e
+                e = (d + temp1) & 0xFFFFFFFF
+                d = c
+                c = b
+                b = a
+                a = (temp1 + temp2) & 0xFFFFFFFF
+            
+            # Aktualizacja hash values
+            h[0] = (h[0] + a) & 0xFFFFFFFF
+            h[1] = (h[1] + b) & 0xFFFFFFFF
+            h[2] = (h[2] + c) & 0xFFFFFFFF
+            h[3] = (h[3] + d) & 0xFFFFFFFF
+            h[4] = (h[4] + e) & 0xFFFFFFFF
+            h[5] = (h[5] + f) & 0xFFFFFFFF
+            h[6] = (h[6] + g) & 0xFFFFFFFF
+            h[7] = (h[7] + hh) & 0xFFFFFFFF
+        
+        # Zwróć 256-bitowy digest
+        return [h[i] for i in range(8)]
+
+    def encrypt(self, text):
+        """Hash tekstu - zwraca hex string"""
+        digest = self._digest(text)
+        return ''.join(f'{b:08x}' for b in digest)
+
+    def decrypt(self, text):
+        """Hash nie ma deszyfrowania - zwraca ten sam hash"""
+        return self.encrypt(text)
+
 # ECDH #
 
 class EllipticCurve:
@@ -753,6 +868,7 @@ class EncryptionApp(tk.Tk):
         ttk.Button(self.current_frame, text="AES", command=self.show_aes_cipher).pack(pady=8)
         ttk.Button(self.current_frame, text="RSA", command=self.show_rsa_cipher).pack(pady=8)
         ttk.Button(self.current_frame, text="ECDH", command=self.show_ecdh_cipher).pack(pady=8)
+        ttk.Button(self.current_frame, text="SHA-256", command=self.show_sha256).pack(pady=8)
 
     def show_caesar_cipher(self):
         self.show_cipher_frame("Caesar Cipher")
@@ -771,6 +887,9 @@ class EncryptionApp(tk.Tk):
 
     def show_rsa_cipher(self):
         self.show_cipher_frame("RSA")
+
+    def show_sha256(self):
+        self.show_cipher_frame("SHA-256")
 
     def show_ecdh_cipher(self):
         if self.current_frame:
@@ -1015,36 +1134,60 @@ class EncryptionApp(tk.Tk):
 
             ttk.Label(self.current_frame, text="Długość klucza (bity):").pack()
             ttk.Entry(self.current_frame, textvariable=bits_var, width=8).pack(pady=2)
-            ttk.Button(self.current_frame, text="Generuj klucze", command=generate_keys).pack(pady=2)
+            ttk.Button(self.current_frame, text="Generuj klucze",
+                    command=generate_keys).pack(pady=2)
 
             ttk.Label(self.current_frame, text="n (moduł):").pack()
-            ttk.Entry(self.current_frame, textvariable=n_text, width=90, state="readonly").pack(pady=1, fill='x')
+            ttk.Entry(self.current_frame, textvariable=n_text, width=90,
+                    state="readonly").pack(pady=1, fill='x')
             ttk.Label(self.current_frame, text="e (klucz publiczny):").pack()
-            ttk.Entry(self.current_frame, textvariable=e_text, width=32, state="readonly").pack(pady=1)
+            ttk.Entry(self.current_frame, textvariable=e_text, width=32,
+                    state="readonly").pack(pady=1)
             ttk.Label(self.current_frame, text="d (klucz prywatny):").pack()
-            ttk.Entry(self.current_frame, textvariable=d_text, width=90, state="readonly").pack(pady=1, fill='x')
+            ttk.Entry(self.current_frame, textvariable=d_text, width=90,
+                    state="readonly").pack(pady=1, fill='x')
 
             ttk.Label(self.current_frame, text="Dane wejściowe:").pack()
-            ttk.Entry(self.current_frame, textvariable=input_data, width=70).pack(pady=2)
+            ttk.Entry(self.current_frame, textvariable=input_data,
+                    width=70).pack(pady=2)
 
             container = ttk.Frame(self.current_frame)
             container.pack(pady=2)
-            ttk.Button(container, text="Szyfruj", command=rsa_encrypt).pack(side='left', padx=8)
-            ttk.Button(container, text="Odszyfruj", command=rsa_decrypt).pack(side='left', padx=8)
+            ttk.Button(container, text="Szyfruj",
+                    command=rsa_encrypt).pack(side='left', padx=8)
+            ttk.Button(container, text="Odszyfruj",
+                    command=rsa_decrypt).pack(side='left', padx=8)
 
             ttk.Label(self.current_frame, text="Wynik:").pack()
-            result_text = tk.Text(self.current_frame, wrap='word', height=9, width=80)
+            result_text = tk.Text(self.current_frame, wrap='word',
+                                height=9, width=80)
             result_text.pack(pady=4, fill='both', expand=True)
             result_text.config(state='disabled')
-            ttk.Button(self.current_frame, text="Zapisz wynik do pliku", command=save_result).pack(pady=8)
+            ttk.Button(self.current_frame, text="Zapisz wynik do pliku",
+                    command=save_result).pack(pady=8)
             return
 
         shift_var = tk.IntVar(value=3)
         mode_var = tk.StringVar(value="encrypt")
 
-        ttk.Label(self.current_frame, text=f"Tryb: {cipher_name}", font=("Arial", 14)).pack(pady=4)
+        if cipher_name == "SHA-256":
+            ttk.Label(self.current_frame, text="Tryb: SHA-256 (funkcja skrótu)", font=("Arial", 14)).pack(pady=4)
+        else:
+            ttk.Label(self.current_frame, text=f"Tryb: {cipher_name}", font=("Arial", 14)).pack(pady=4)
+
         ttk.Label(self.current_frame, text="Dane wejściowe:").pack(pady=2)
         ttk.Entry(self.current_frame, textvariable=input_data, width=54).pack(pady=3)
+
+        container = ttk.Frame(self.current_frame)
+        container.pack(pady=2)
+
+        if cipher_name == "SHA-256":
+            mode_var.set("encrypt")
+            ttk.Label(container, text="Operacja: oblicz skrót SHA-256 (brak odszyfrowania)").pack(side='left', padx=8)
+        else:
+            ttk.Radiobutton(container, text="Szyfruj", variable=mode_var, value="encrypt").pack(side='left', padx=8)
+            if cipher_name != "Beaufort Cipher":
+                ttk.Radiobutton(container, text="Odszyfruj", variable=mode_var, value="decrypt").pack(side='left', padx=8)
 
         def load_from_file():
             file_path = filedialog.askopenfilename(filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")])
@@ -1246,6 +1389,18 @@ class EncryptionApp(tk.Tk):
                     except Exception as e:
                         messagebox.showerror("Błąd", f"Nieprawidłowe dane lub algorytm. {e}")
                         return
+                elif cipher_name == "SHA-256":
+                    algo = SHA256()
+                    result = algo.encrypt(text)
+                    steps = []
+                    self.logger.add(
+                        operation="Hashowanie",
+                        cipher_name="SHA-256",
+                        input_data=text,
+                        result=result,
+                        details={"steps": steps}
+                    )
+                    self.update_logs_display()
 
                 if hasattr(algo, "encrypt") and "return_steps" in algo.encrypt.__code__.co_varnames:
                     if mode_var.get() == "encrypt":
@@ -1278,13 +1433,25 @@ class EncryptionApp(tk.Tk):
 
         container = ttk.Frame(self.current_frame)
         container.pack(pady=2)
-        ttk.Radiobutton(container, text="Szyfruj", variable=mode_var, value="encrypt").pack(side='left', padx=8)
-        if cipher_name != "Beaufort Cipher":
-            ttk.Radiobutton(container, text="Odszyfruj", variable=mode_var, value="decrypt").pack(side='left', padx=8)
 
-        ttk.Button(self.current_frame, text="Wykonaj", command=process).pack(pady=8)
-
-        ttk.Label(self.current_frame, text="Wynik:").pack()
+        if cipher_name == "SHA-256":
+            mode_var.set("encrypt")
+            ttk.Label(container,
+                    text="Operacja: oblicz skrót SHA-256 (brak odszyfrowania)"
+                    ).pack(side='left', padx=8)
+            ttk.Button(self.current_frame, text="Oblicz hash",
+                    command=process).pack(pady=8)
+            ttk.Label(self.current_frame,
+                    text="Hash (SHA-256) w formacie hex:").pack()
+        else:
+            ttk.Radiobutton(container, text="Szyfruj",
+                            variable=mode_var, value="encrypt").pack(side='left', padx=8)
+            if cipher_name != "Beaufort Cipher":
+                ttk.Radiobutton(container, text="Odszyfruj",
+                                variable=mode_var, value="decrypt").pack(side='left', padx=8)
+            ttk.Button(self.current_frame, text="Wykonaj",
+                    command=process).pack(pady=8)
+            ttk.Label(self.current_frame, text="Wynik:").pack()
         result_text = tk.Text(self.current_frame, wrap='word', height=9, width=60)
         result_text.pack(pady=4, fill='both', expand=True)
         result_text.config(state='disabled')

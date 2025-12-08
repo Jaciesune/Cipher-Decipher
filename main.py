@@ -242,6 +242,27 @@ def show_details_window(content):
 
 # -------------------------------------- #
 
+# Podpis elektroniczny
+
+class DigitalSignature:
+    def __init__(self, rsa):
+        self.rsa = rsa          # obiekt RSACipherAlgorithm
+        self.sha256 = SHA256()  # klasa SHA-256
+
+    def sign(self, message: str):
+        digest_hex = self.sha256.encrypt(message)
+        digest_int = int(digest_hex, 16)
+        n, d = self.rsa.private_key()
+        signature = pow(digest_int, d, n)
+        return signature, digest_hex
+
+    def verify(self, message: str, signature: int):
+        digest_hex = self.sha256.encrypt(message)
+        digest_int = int(digest_hex, 16)
+        n, e = self.rsa.public_key()
+        recovered = pow(signature, e, n)
+        return recovered == digest_int, digest_hex
+
 # SHA-256 #
 
 class SHA256(CipherAlgorithm):
@@ -869,6 +890,7 @@ class EncryptionApp(tk.Tk):
         ttk.Button(self.current_frame, text="RSA", command=self.show_rsa_cipher).pack(pady=8)
         ttk.Button(self.current_frame, text="ECDH", command=self.show_ecdh_cipher).pack(pady=8)
         ttk.Button(self.current_frame, text="SHA-256", command=self.show_sha256).pack(pady=8)
+        ttk.Button(self.current_frame, text="Podpis elektroniczny", command=self.show_signature).pack(pady=8)
 
     def show_caesar_cipher(self):
         self.show_cipher_frame("Caesar Cipher")
@@ -890,6 +912,9 @@ class EncryptionApp(tk.Tk):
 
     def show_sha256(self):
         self.show_cipher_frame("SHA-256")
+
+    def show_signature(self):
+        self.show_cipher_frame("Signature")
 
     def show_ecdh_cipher(self):
         if self.current_frame:
@@ -1188,6 +1213,80 @@ class EncryptionApp(tk.Tk):
             ttk.Radiobutton(container, text="Szyfruj", variable=mode_var, value="encrypt").pack(side='left', padx=8)
             if cipher_name != "Beaufort Cipher":
                 ttk.Radiobutton(container, text="Odszyfruj", variable=mode_var, value="decrypt").pack(side='left', padx=8)
+
+
+        if cipher_name == "Signature":
+            rsa = RSA(bits=256)
+            ds = DigitalSignature(rsa)
+
+            message_var = input_data
+            signature_var = tk.StringVar()
+
+            ttk.Label(self.current_frame, text="Podpis (liczba dziesiętna):").pack(pady=2)
+            ttk.Entry(self.current_frame, textvariable=signature_var, width=70).pack(pady=2)
+
+            # pole na wynik (status + hash)
+            result_text = tk.Text(self.current_frame, wrap='word', height=6, width=70)
+            result_text.pack(pady=4, fill='both', expand=True)
+            result_text.config(state='disabled')
+
+            def do_sign():
+                msg = message_var.get()
+                if not msg:
+                    messagebox.showerror("Błąd", "Podaj wiadomość do podpisania.")
+                    return
+                signature, digest_hex = ds.sign(msg)
+                signature_var.set(str(signature))
+                result_text.config(state='normal')
+                result_text.delete('1.0', tk.END)
+                result_text.insert(tk.END, "Wygenerowano podpis.\n")
+                result_text.insert(tk.END, f"Hash wiadomości (SHA-256): {digest_hex}\n")
+                result_text.insert(tk.END, f"Podpis (dec): {signature}\n")
+                result_text.config(state='disabled')
+                self.logger.add(
+                    operation="Podpis",
+                    cipher_name="Podpis RSA+SHA-256",
+                    input_data=msg,
+                    result=str(signature),
+                    details={"hash": digest_hex, "n": str(rsa.n)}
+                )
+                self.update_logs_display()
+
+            def do_verify():
+                msg = message_var.get()
+                sig_txt = signature_var.get().strip()
+                if not msg or not sig_txt:
+                    messagebox.showerror("Błąd", "Podaj wiadomość i podpis do weryfikacji.")
+                    return
+                try:
+                    sig_int = int(sig_txt)
+                except ValueError:
+                    messagebox.showerror("Błąd", "Podpis musi być liczbą całkowitą.")
+                    return
+                ok, digest_hex = ds.verify(msg, sig_int)
+                result_text.config(state='normal')
+                result_text.delete('1.0', tk.END)
+                result_text.insert(
+                    tk.END,
+                    "Podpis PRAWIDŁOWY\n" if ok else "Podpis NIEPRAWIDŁOWY\n"
+                )
+                result_text.insert(tk.END, f"Hash wiadomości (SHA-256): {digest_hex}\n")
+                result_text.config(state='disabled')
+                self.logger.add(
+                    operation="Weryfikacja podpisu",
+                    cipher_name="Podpis RSA+SHA-256",
+                    input_data=msg,
+                    result="OK" if ok else "BŁĄD",
+                    details={"hash": digest_hex, "signature": sig_txt, "n": str(rsa.n)}
+                )
+                self.update_logs_display()
+
+            btn_frame = ttk.Frame(self.current_frame)
+            btn_frame.pack(pady=6)
+            ttk.Button(btn_frame, text="Podpisz", command=do_sign).pack(side='left', padx=8)
+            ttk.Button(btn_frame, text="Zweryfikuj", command=do_verify).pack(side='left', padx=8)
+
+            return
 
         def load_from_file():
             file_path = filedialog.askopenfilename(filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")])
